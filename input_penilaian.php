@@ -6,29 +6,34 @@ requireRole('Staff');
 $page_title  = 'Input Penilaian Vendor';
 $active_menu = 'input_penilaian';
 
-$periode = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM periode WHERE status_aktif=1 LIMIT 1"));
-$periode_id = $periode['id_periode'] ?? 0;
-$vendors = mysqli_fetch_all(mysqli_query($conn, "SELECT * FROM vendor WHERE status_aktif=1 ORDER BY nama_vendor"), MYSQLI_ASSOC);
-$jenis_list = mysqli_fetch_all(mysqli_query($conn, "SELECT * FROM jenis_barang WHERE status_aktif=1 ORDER BY nama_barang"), MYSQLI_ASSOC);
-$kriteria_list = mysqli_fetch_all(mysqli_query($conn, "SELECT * FROM kriteria ORDER BY id_kriteria"), MYSQLI_ASSOC);
+$periode       = db_fetch("SELECT * FROM periode WHERE status_aktif = true LIMIT 1");
+$periode_id    = $periode['id_periode'] ?? 0;
+$vendors       = db_fetch_all("SELECT * FROM vendor WHERE status_aktif = true ORDER BY nama_vendor");
+$jenis_list    = db_fetch_all("SELECT * FROM jenis_barang WHERE status_aktif = true ORDER BY nama_barang");
+$kriteria_list = db_fetch_all("SELECT * FROM kriteria ORDER BY id_kriteria");
 
-$selected_vendor = (int) ($_GET['vendor'] ?? $_POST['id_vendor'] ?? 0);
-$selected_jenis  = (int) ($_GET['jenis'] ?? $_POST['id_jenis'] ?? 0);
-$nilai_values = [];
-$errors = [];
+$selected_vendor   = (int) ($_GET['vendor'] ?? $_POST['id_vendor'] ?? 0);
+$selected_jenis    = (int) ($_GET['jenis'] ?? $_POST['id_jenis'] ?? 0);
+$nilai_values      = [];
+$errors            = [];
 $evaluated_vendors = [];
 
 if ($periode_id && $selected_jenis) {
-    $evaluated_vendors = mysqli_query($conn, "SELECT v.id_vendor, v.kode_vendor, v.nama_vendor,
-        COUNT(DISTINCT p.id_kriteria) AS jumlah_kriteria,
-        MAX(p.updated_at) AS terakhir_dinilai
-        FROM penilaian p
-        JOIN vendor v ON p.id_vendor=v.id_vendor
-        WHERE p.id_periode=$periode_id AND p.id_jenis=$selected_jenis AND v.status_aktif=1
-        GROUP BY v.id_vendor ORDER BY v.nama_vendor");
+    $evaluated_vendors = db_fetch_all(
+        "SELECT v.id_vendor, v.kode_vendor, v.nama_vendor,
+            COUNT(DISTINCT p.id_kriteria) AS jumlah_kriteria,
+            MAX(p.updated_at) AS terakhir_dinilai
+         FROM penilaian p
+         JOIN vendor v ON p.id_vendor = v.id_vendor
+         WHERE p.id_periode = ? AND p.id_jenis = ? AND v.status_aktif = true
+         GROUP BY v.id_vendor, v.kode_vendor, v.nama_vendor
+         ORDER BY v.nama_vendor",
+        [$periode_id, $selected_jenis]
+    );
 }
 
-function gradeFromScore(float $score): string {
+function gradeFromScore(float $score): string
+{
     if ($score >= 85) return 'A';
     if ($score >= 70) return 'B';
     if ($score >= 55) return 'C';
@@ -37,9 +42,12 @@ function gradeFromScore(float $score): string {
 }
 
 if ($selected_vendor && $selected_jenis && $periode_id) {
-    $res = mysqli_query($conn, "SELECT id_kriteria, nilai_kriteria FROM penilaian
-        WHERE id_vendor=$selected_vendor AND id_jenis=$selected_jenis AND id_periode=$periode_id");
-    while ($row = mysqli_fetch_assoc($res)) {
+    $res = db_fetch_all(
+        "SELECT id_kriteria, nilai_kriteria FROM penilaian
+         WHERE id_vendor = ? AND id_jenis = ? AND id_periode = ?",
+        [$selected_vendor, $selected_jenis, $periode_id]
+    );
+    foreach ($res as $row) {
         $nilai_values[$row['id_kriteria']] = $row['nilai_kriteria'];
     }
 }
@@ -56,10 +64,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['aksi']) && $_POST['ak
     }
 
     $submitted_values = $_POST['nilai'] ?? [];
-    $rows = [];
+    $rows             = [];
     foreach ($kriteria_list as $kriteria) {
-        $k_id = $kriteria['id_kriteria'];
-        $raw = $submitted_values[$k_id] ?? '';
+        $k_id  = $kriteria['id_kriteria'];
+        $raw   = $submitted_values[$k_id] ?? '';
         $nilai = is_numeric($raw) ? (float) $raw : null;
         if ($nilai === null || $raw === '') {
             $errors[] = "Nilai untuk kriteria '{$kriteria['nama_kriteria']}' harus diisi.";
@@ -75,20 +83,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['aksi']) && $_POST['ak
     }
 
     if (empty($errors) && !empty($rows)) {
-        $values = [];
-        foreach ($rows as $row) {
-            $grade = gradeFromScore((float) $row['nilai']);
-            $values[] = "($selected_vendor,{$row['id_kriteria']},$periode_id,$selected_jenis,{$_SESSION['id_user']},{$row['nilai']},{$row['nilai']},'$grade')";
-        }
-
-        $sql = "INSERT INTO penilaian (id_vendor,id_kriteria,id_periode,id_jenis,id_user,nilai_kriteria,total_nilai,grade) VALUES " . implode(',', $values) .
-               " ON DUPLICATE KEY UPDATE nilai_kriteria=VALUES(nilai_kriteria), total_nilai=VALUES(total_nilai), grade=VALUES(grade), updated_at=NOW()";
-        mysqli_query($conn, $sql);
-        if (mysqli_error($conn)) {
-            $errors[] = 'Gagal menyimpan penilaian: ' . mysqli_error($conn);
-        } else {
+        try {
+            $user_id = $_SESSION['id_user'];
+            foreach ($rows as $row) {
+                $grade = gradeFromScore((float) $row['nilai']);
+                // PostgreSQL ON CONFLICT clause
+                db_query(
+                    "INSERT INTO penilaian (id_vendor, id_kriteria, id_periode, id_jenis, id_user, nilai_kriteria, total_nilai, grade)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                     ON CONFLICT (id_vendor, id_kriteria, id_periode, id_jenis)
+                     DO UPDATE SET nilai_kriteria = EXCLUDED.nilai_kriteria,
+                                   total_nilai = EXCLUDED.total_nilai,
+                                   grade = EXCLUDED.grade,
+                                   updated_at = NOW()",
+                    [$selected_vendor, $row['id_kriteria'], $periode_id, $selected_jenis, $user_id, $row['nilai'], $row['nilai'], $grade]
+                );
+            }
             setAlert('success', 'Penilaian vendor berhasil disimpan.');
-            redirect("input_penilaian.php?vendor=$selected_vendor&jenis=$selected_jenis");
+            redirect("input_penilaian.php?vendor={$selected_vendor}&jenis={$selected_jenis}");
+        } catch (Exception $e) {
+            $errors[] = 'Gagal menyimpan penilaian: ' . $e->getMessage();
         }
     }
 }
@@ -148,7 +162,7 @@ require_once 'header.php';
 <?php if ($selected_jenis && $periode_id): ?>
 <div class="card" style="margin-bottom:18px">
   <div class="card-title">Vendor yang Sudah Dinilai</div>
-  <?php if (mysqli_num_rows($evaluated_vendors) > 0): ?>
+  <?php if (!empty($evaluated_vendors)): ?>
   <div class="tbl-wrap">
     <table class="tbl">
       <thead>
@@ -161,7 +175,7 @@ require_once 'header.php';
         </tr>
       </thead>
       <tbody>
-        <?php $no=1; while ($row = mysqli_fetch_assoc($evaluated_vendors)): ?>
+        <?php $no = 1; foreach ($evaluated_vendors as $row): ?>
         <tr>
           <td><?= $no++ ?></td>
           <td><?= htmlspecialchars($row['kode_vendor']) ?></td>
@@ -169,7 +183,7 @@ require_once 'header.php';
           <td><?= htmlspecialchars($row['jumlah_kriteria']) ?></td>
           <td><?= htmlspecialchars($row['terakhir_dinilai'] ?? '-') ?></td>
         </tr>
-        <?php endwhile; ?>
+        <?php endforeach; ?>
       </tbody>
     </table>
   </div>

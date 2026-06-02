@@ -1,23 +1,24 @@
 <?php
 require_once 'database.php';
 require_once 'session.php';
- 
+
 if (isLoggedIn()) {
     redirect('dashboard.php');
 }
- 
+
 $error = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $username = clean($conn, $_POST['username'] ?? '');
+    $username = trim($_POST['username'] ?? '');
     $password = $_POST['password'] ?? '';
- 
+
     if (empty($username) || empty($password)) {
         $error = 'Username dan password tidak boleh kosong.';
     } else {
-        $sql = "SELECT * FROM users WHERE username = '$username' AND status_aktif = 1";
-        $res = mysqli_query($conn, $sql);
-        $user = mysqli_fetch_assoc($res);
- 
+        $user = db_fetch(
+            "SELECT * FROM users WHERE username = ? AND status_aktif = true",
+            [$username]
+        );
+
         if ($user && password_verify($password, $user['password'])) {
             $_SESSION['id_user']      = $user['id_user'];
             $_SESSION['username']     = $user['username'];
@@ -36,7 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Login — SPV Bio Farma</title>
-<link rel="stylesheet" href="<?= BASE_URL ?>/style.css">
+<link rel="stylesheet" href="/style.css">
 </head>
 <body>
 <div class="login-wrap">
@@ -46,14 +47,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       <h2>Sistem Pemilihan Vendor</h2>
       <p>PT Bio Farma (Persero)</p>
     </div>
- 
+
     <?php if ($error): ?>
     <div style="background:#FAECE7;border-left:4px solid #993C1D;color:#993C1D;
                 padding:9px 14px;border-radius:4px;font-size:12px;margin-bottom:14px">
       <?= htmlspecialchars($error) ?>
     </div>
     <?php endif; ?>
- 
+
     <form method="POST">
       <div class="form-group">
         <label class="form-label">Username</label>
@@ -70,7 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         Masuk
       </button>
     </form>
- 
+
     <p style="text-align:center;font-size:11px;color:#bbb;margin-top:14px">
       Hak akses disesuaikan dengan role pengguna
     </p>

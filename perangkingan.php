@@ -6,11 +6,12 @@ requireRole('Manajer');
 $page_title  = 'Perangkingan Vendor';
 $active_menu = 'perangkingan';
 
-$periode = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM periode WHERE status_aktif=1 LIMIT 1"));
-$periode_id = $periode['id_periode'] ?? 0;
-$jenis_list = mysqli_fetch_all(mysqli_query($conn, "SELECT * FROM jenis_barang WHERE status_aktif=1 ORDER BY nama_barang"), MYSQLI_ASSOC);
-$selected_jenis = (int) ($_GET['jenis'] ?? ($jenis_list[0]['id_jenis'] ?? 0));
+$periode              = db_fetch("SELECT * FROM periode WHERE status_aktif = true LIMIT 1");
+$periode_id           = $periode['id_periode'] ?? 0;
+$jenis_list           = db_fetch_all("SELECT * FROM jenis_barang WHERE status_aktif = true ORDER BY nama_barang");
+$selected_jenis       = (int) ($_GET['jenis'] ?? ($jenis_list[0]['id_jenis'] ?? 0));
 $selected_jenis_label = '';
+
 foreach ($jenis_list as $jenis) {
     if ($selected_jenis === (int) $jenis['id_jenis']) {
         $selected_jenis_label = $jenis['kode_barang'] . ' — ' . $jenis['nama_barang'];
@@ -18,20 +19,21 @@ foreach ($jenis_list as $jenis) {
     }
 }
 
-function formatPreferenceScore(float $score): string {
+function formatPreferenceScore(float $score): string
+{
     return number_format($score, 4, '.', '');
 }
 
 $results = [];
 if ($selected_jenis && $periode_id) {
-    $res = mysqli_query($conn, "SELECT h.peringkat, h.nilai_preferensi, v.kode_vendor, v.nama_vendor
-        FROM hasil_saw h
-        JOIN vendor v ON v.id_vendor = h.id_vendor
-        WHERE h.id_periode=$periode_id AND h.id_jenis=$selected_jenis
-        ORDER BY h.peringkat ASC, h.nilai_preferensi DESC");
-    while ($row = mysqli_fetch_assoc($res)) {
-        $results[] = $row;
-    }
+    $results = db_fetch_all(
+        "SELECT h.peringkat, h.nilai_preferensi, v.kode_vendor, v.nama_vendor
+         FROM hasil_saw h
+         JOIN vendor v ON v.id_vendor = h.id_vendor
+         WHERE h.id_periode = ? AND h.id_jenis = ?
+         ORDER BY h.peringkat ASC, h.nilai_preferensi DESC",
+        [$periode_id, $selected_jenis]
+    );
 }
 
 require_once 'header.php';

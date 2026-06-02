@@ -1,0 +1,21 @@
+{
+  "functions": {
+    "*.php": {
+      "runtime": "vercel-php@0.7.2"
+    }
+  },
+  "routes": [
+    {
+      "src": "^/$",
+      "dest": "/index.php"
+    },
+    {
+      "src": "^/([a-zA-Z0-9_\\-]+)\\.php(.*)",
+      "dest": "/$1.php$2"
+    },
+    {
+      "src": "^/(style\\.css|script\\.js)$",
+      "dest": "/$1"
+    }
+  ]
+}

@@ -2,97 +2,111 @@
 require_once 'database.php';
 require_once 'session.php';
 requireRole('Administrator');
- 
+
 $page_title  = 'Data Vendor';
 $active_menu = 'vendor';
- 
+
 // TAMBAH
-if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['aksi']) && $_POST['aksi']==='tambah') {
-    $kode   = clean($conn, $_POST['kode_vendor']);
-    $nama   = clean($conn, $_POST['nama_vendor']);
-    $ket    = clean($conn, $_POST['keterangan']);
-    $alamat = clean($conn, $_POST['alamat']);
-    $telp   = clean($conn, $_POST['no_telepon']);
-    $email  = clean($conn, $_POST['email']);
- 
-    $cek = mysqli_fetch_row(mysqli_query($conn,"SELECT id_vendor FROM vendor WHERE kode_vendor='$kode'"));
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['aksi']) && $_POST['aksi'] === 'tambah') {
+    $kode   = trim($_POST['kode_vendor'] ?? '');
+    $nama   = trim($_POST['nama_vendor'] ?? '');
+    $ket    = trim($_POST['keterangan'] ?? '');
+    $alamat = trim($_POST['alamat'] ?? '');
+    $telp   = trim($_POST['no_telepon'] ?? '');
+    $email  = trim($_POST['email'] ?? '');
+
+    $cek = db_fetch("SELECT id_vendor FROM vendor WHERE kode_vendor = ?", [$kode]);
     if ($cek) {
-        setAlert('danger','Kode vendor sudah digunakan. Gunakan kode yang berbeda.');
+        setAlert('danger', 'Kode vendor sudah digunakan. Gunakan kode yang berbeda.');
     } else {
-        mysqli_query($conn,"INSERT INTO vendor (kode_vendor,nama_vendor,keterangan,alamat,no_telepon,email)
-            VALUES ('$kode','$nama','$ket','$alamat','$telp','$email')");
-        setAlert('success','Data vendor berhasil disimpan.');
+        db_query(
+            "INSERT INTO vendor (kode_vendor, nama_vendor, keterangan, alamat, no_telepon, email)
+             VALUES (?, ?, ?, ?, ?, ?)",
+            [$kode, $nama, $ket, $alamat, $telp, $email]
+        );
+        setAlert('success', 'Data vendor berhasil disimpan.');
     }
     redirect('vendor.php');
 }
- 
+
 // UBAH
-if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['aksi']) && $_POST['aksi']==='ubah') {
-    $id     = (int)$_POST['id_vendor'];
-    $nama   = clean($conn, $_POST['nama_vendor']);
-    $ket    = clean($conn, $_POST['keterangan']);
-    $alamat = clean($conn, $_POST['alamat']);
-    $telp   = clean($conn, $_POST['no_telepon']);
-    $email  = clean($conn, $_POST['email']);
-    mysqli_query($conn,"UPDATE vendor SET nama_vendor='$nama',keterangan='$ket',
-        alamat='$alamat',no_telepon='$telp',email='$email'
-        WHERE id_vendor=$id");
-    setAlert('success','Data vendor berhasil diperbarui.');
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['aksi']) && $_POST['aksi'] === 'ubah') {
+    $id     = (int) $_POST['id_vendor'];
+    $nama   = trim($_POST['nama_vendor'] ?? '');
+    $ket    = trim($_POST['keterangan'] ?? '');
+    $alamat = trim($_POST['alamat'] ?? '');
+    $telp   = trim($_POST['no_telepon'] ?? '');
+    $email  = trim($_POST['email'] ?? '');
+    db_query(
+        "UPDATE vendor SET nama_vendor = ?, keterangan = ?, alamat = ?, no_telepon = ?, email = ?
+         WHERE id_vendor = ?",
+        [$nama, $ket, $alamat, $telp, $email, $id]
+    );
+    setAlert('success', 'Data vendor berhasil diperbarui.');
     redirect('vendor.php');
 }
- 
+
 // HAPUS
 if (isset($_GET['hapus'])) {
-    $id  = (int)$_GET['hapus'];
-    $cek = mysqli_fetch_row(mysqli_query($conn,"SELECT id_penilaian FROM penilaian WHERE id_vendor=$id LIMIT 1"));
+    $id  = (int) $_GET['hapus'];
+    $cek = db_fetch("SELECT id_penilaian FROM penilaian WHERE id_vendor = ? LIMIT 1", [$id]);
     if ($cek) {
-        setAlert('danger','Vendor tidak dapat dihapus karena masih memiliki data penilaian terkait.');
+        setAlert('danger', 'Vendor tidak dapat dihapus karena masih memiliki data penilaian terkait.');
     } else {
-        mysqli_query($conn,"DELETE FROM vendor WHERE id_vendor=$id");
-        setAlert('success','Data vendor berhasil dihapus.');
+        db_query("DELETE FROM vendor WHERE id_vendor = ?", [$id]);
+        setAlert('success', 'Data vendor berhasil dihapus.');
     }
     redirect('vendor.php');
 }
- 
+
 // GET EDIT
 $edit_data = null;
 if (isset($_GET['edit'])) {
-    $id = (int)$_GET['edit'];
-    $edit_data = mysqli_fetch_assoc(mysqli_query($conn,"SELECT * FROM vendor WHERE id_vendor=$id"));
+    $id        = (int) $_GET['edit'];
+    $edit_data = db_fetch("SELECT * FROM vendor WHERE id_vendor = ?", [$id]);
 }
- 
+
 // SEARCH & FILTER
-$search = clean($conn, $_GET['search'] ?? '');
-$filter = clean($conn, $_GET['filter'] ?? '');
+$search = trim($_GET['search'] ?? '');
+$filter = trim($_GET['filter'] ?? '');
+
+$params = [];
 $where  = "WHERE 1=1";
-if ($search) $where .= " AND (nama_vendor LIKE '%$search%' OR kode_vendor LIKE '%$search%')";
-if ($filter) $where .= " AND keterangan='$filter'";
-$vendors = mysqli_query($conn,"SELECT * FROM vendor $where ORDER BY kode_vendor");
- 
+if ($search) {
+    $where   .= " AND (nama_vendor ILIKE ? OR kode_vendor ILIKE ?)";
+    $params[] = "%{$search}%";
+    $params[] = "%{$search}%";
+}
+if ($filter) {
+    $where   .= " AND keterangan = ?";
+    $params[] = $filter;
+}
+$vendors = db_fetch_all("SELECT * FROM vendor $where ORDER BY kode_vendor", $params);
+
 require_once 'header.php';
 ?>
- 
+
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
   <h1 class="page-title" style="margin:0">Data Master Vendor</h1>
   <button onclick="document.getElementById('modal-tambah').style.display='flex'"
           class="btn btn-primary">+ Tambah Vendor</button>
 </div>
- 
+
 <!-- SEARCH -->
 <form method="GET" class="search-bar" style="margin-bottom:14px">
   <input type="text" name="search" class="form-control" placeholder="Cari nama atau kode vendor..."
          value="<?= htmlspecialchars($search) ?>">
   <select name="filter" class="form-control" style="width:160px">
     <option value="">Semua keterangan</option>
-    <option value="Lokal" <?= $filter==='Lokal'?'selected':'' ?>>Lokal</option>
-    <option value="Impor" <?= $filter==='Impor'?'selected':'' ?>>Impor</option>
+    <option value="Lokal" <?= $filter === 'Lokal' ? 'selected' : '' ?>>Lokal</option>
+    <option value="Impor" <?= $filter === 'Impor' ? 'selected' : '' ?>>Impor</option>
   </select>
   <button type="submit" class="btn btn-secondary">Cari</button>
-  <?php if ($search||$filter): ?>
+  <?php if ($search || $filter): ?>
   <a href="vendor.php" class="btn btn-secondary">Reset</a>
   <?php endif; ?>
 </form>
- 
+
 <!-- TABEL -->
 <div class="card" style="padding:0;overflow:hidden">
 <div class="tbl-wrap">
@@ -104,12 +118,12 @@ require_once 'header.php';
     </tr>
   </thead>
   <tbody>
-  <?php $no=1; while($v = mysqli_fetch_assoc($vendors)): ?>
+  <?php $no = 1; foreach ($vendors as $v): ?>
   <tr>
     <td><?= $no++ ?></td>
     <td><?= htmlspecialchars($v['kode_vendor']) ?></td>
     <td><?= htmlspecialchars($v['nama_vendor']) ?></td>
-    <td><span class="badge <?= $v['keterangan']==='Lokal'?'badge-primary':'badge-secondary' ?>">
+    <td><span class="badge <?= $v['keterangan'] === 'Lokal' ? 'badge-primary' : 'badge-secondary' ?>">
       <?= $v['keterangan'] ?></span></td>
     <td>
       <a href="vendor.php?edit=<?= $v['id_vendor'] ?>" class="btn btn-secondary btn-sm">Ubah</a>
@@ -117,12 +131,12 @@ require_once 'header.php';
          onclick="return confirmDelete()">Hapus</a>
     </td>
   </tr>
-  <?php endwhile; ?>
+  <?php endforeach; ?>
   </tbody>
 </table>
 </div>
 </div>
- 
+
 <!-- MODAL TAMBAH -->
 <div id="modal-tambah" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;
      background:rgba(0,0,0,.4);z-index:999;align-items:center;justify-content:center">
@@ -169,7 +183,7 @@ require_once 'header.php';
     </form>
   </div>
 </div>
- 
+
 <!-- MODAL UBAH -->
 <?php if ($edit_data): ?>
 <div id="modal-ubah" style="display:flex;position:fixed;top:0;left:0;width:100%;height:100%;
@@ -187,14 +201,15 @@ require_once 'header.php';
         <div class="form-group">
           <label class="form-label">Keterangan</label>
           <select name="keterangan" class="form-control">
-            <option value="Lokal" <?= $edit_data['keterangan']==='Lokal'?'selected':'' ?>>Lokal</option>
-            <option value="Impor" <?= $edit_data['keterangan']==='Impor'?'selected':'' ?>>Impor</option>
+            <option value="Lokal" <?= $edit_data['keterangan'] === 'Lokal' ? 'selected' : '' ?>>Lokal</option>
+            <option value="Impor" <?= $edit_data['keterangan'] === 'Impor' ? 'selected' : '' ?>>Impor</option>
           </select>
         </div>
       </div>
       <div class="form-group">
         <label class="form-label">Nama Vendor</label>
-        <input type="text" name="nama_vendor" class="form-control" value="<?= htmlspecialchars($edit_data['nama_vendor']) ?>" required>
+        <input type="text" name="nama_vendor" class="form-control"
+               value="<?= htmlspecialchars($edit_data['nama_vendor']) ?>" required>
       </div>
       <div class="form-group">
         <label class="form-label">Alamat</label>
@@ -203,11 +218,13 @@ require_once 'header.php';
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">No. Telepon</label>
-          <input type="text" name="no_telepon" class="form-control" value="<?= htmlspecialchars($edit_data['no_telepon']) ?>">
+          <input type="text" name="no_telepon" class="form-control"
+                 value="<?= htmlspecialchars($edit_data['no_telepon']) ?>">
         </div>
         <div class="form-group">
           <label class="form-label">Email</label>
-          <input type="email" name="email" class="form-control" value="<?= htmlspecialchars($edit_data['email']) ?>">
+          <input type="email" name="email" class="form-control"
+                 value="<?= htmlspecialchars($edit_data['email']) ?>">
         </div>
       </div>
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
@@ -218,5 +235,5 @@ require_once 'header.php';
   </div>
 </div>
 <?php endif; ?>
- 
-<?php require_once '../../includes/footer.php'; ?>
+
+<?php require_once 'footer.php'; ?>

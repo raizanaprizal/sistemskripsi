@@ -6,39 +6,52 @@ requireRole('Manajer');
 $page_title  = 'Detail Penilaian';
 $active_menu = 'detail';
 
-$periode = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM periode WHERE status_aktif=1 LIMIT 1"));
-$periode_id = $periode['id_periode'] ?? 0;
-$jenis_list = mysqli_fetch_all(mysqli_query($conn, "SELECT * FROM jenis_barang WHERE status_aktif=1 ORDER BY nama_barang"), MYSQLI_ASSOC);
-$selected_jenis = (int) ($_GET['jenis'] ?? ($jenis_list[0]['id_jenis'] ?? 0));
+$periode              = db_fetch("SELECT * FROM periode WHERE status_aktif = true LIMIT 1");
+$periode_id           = $periode['id_periode'] ?? 0;
+$jenis_list           = db_fetch_all("SELECT * FROM jenis_barang WHERE status_aktif = true ORDER BY nama_barang");
+$selected_jenis       = (int) ($_GET['jenis'] ?? ($jenis_list[0]['id_jenis'] ?? 0));
 $selected_jenis_label = '';
+
 foreach ($jenis_list as $jenis) {
     if ($selected_jenis === (int) $jenis['id_jenis']) {
         $selected_jenis_label = $jenis['kode_barang'] . ' — ' . $jenis['nama_barang'];
         break;
     }
 }
+
 $vendor_results = [];
 $vendor_details = [];
 
 if ($selected_jenis && $periode_id) {
-    $vendor_res = mysqli_query($conn, "SELECT h.id_hasil, h.peringkat, h.nilai_preferensi, v.id_vendor, v.kode_vendor, v.nama_vendor
-        FROM hasil_saw h
-        JOIN vendor v ON v.id_vendor = h.id_vendor
-        WHERE h.id_periode = $periode_id AND h.id_jenis = $selected_jenis
-        ORDER BY h.peringkat ASC, h.nilai_preferensi DESC");
-    while ($row = mysqli_fetch_assoc($vendor_res)) {
+    $vendor_res = db_fetch_all(
+        "SELECT h.id_hasil, h.peringkat, h.nilai_preferensi, v.id_vendor, v.kode_vendor, v.nama_vendor
+         FROM hasil_saw h
+         JOIN vendor v ON v.id_vendor = h.id_vendor
+         WHERE h.id_periode = ? AND h.id_jenis = ?
+         ORDER BY h.peringkat ASC, h.nilai_preferensi DESC",
+        [$periode_id, $selected_jenis]
+    );
+
+    foreach ($vendor_res as $row) {
         $vendor_results[$row['id_hasil']] = $row;
     }
 
     if ($vendor_results) {
-        $hasil_ids = implode(',', array_keys($vendor_results));
-        $detail_res = mysqli_query($conn, "SELECT d.id_hasil, k.kode_kriteria, k.nama_kriteria,
-            d.nilai_asli, d.nilai_normalisasi, d.bobot_kriteria, d.nilai_terbobot
-            FROM detail_normalisasi d
-            JOIN kriteria k ON k.id_kriteria = d.id_kriteria
-            WHERE d.id_hasil IN ($hasil_ids)
-            ORDER BY d.id_hasil, k.id_kriteria");
-        while ($row = mysqli_fetch_assoc($detail_res)) {
+        $hasil_ids  = array_keys($vendor_results);
+        // PostgreSQL parameter binding for IN clause
+        $placeholders = implode(',', array_fill(0, count($hasil_ids), '?'));
+        
+        $detail_res = db_fetch_all(
+            "SELECT d.id_hasil, k.kode_kriteria, k.nama_kriteria,
+                d.nilai_asli, d.nilai_normalisasi, d.bobot_kriteria, d.nilai_terbobot
+             FROM detail_normalisasi d
+             JOIN kriteria k ON k.id_kriteria = d.id_kriteria
+             WHERE d.id_hasil IN ($placeholders)
+             ORDER BY d.id_hasil, k.id_kriteria",
+            $hasil_ids
+        );
+
+        foreach ($detail_res as $row) {
             $vendor_details[$row['id_hasil']][] = $row;
         }
     }

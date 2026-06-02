@@ -6,16 +6,17 @@ requireRole('Staff');
 $page_title  = 'Proses SAW';
 $active_menu = 'proses_saw';
 
-$periode = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM periode WHERE status_aktif=1 LIMIT 1"));
-$periode_id = $periode['id_periode'] ?? 0;
-$jenis_list = mysqli_fetch_all(mysqli_query($conn, "SELECT * FROM jenis_barang WHERE status_aktif=1 ORDER BY nama_barang"), MYSQLI_ASSOC);
+$periode        = db_fetch("SELECT * FROM periode WHERE status_aktif = true LIMIT 1");
+$periode_id     = $periode['id_periode'] ?? 0;
+$jenis_list     = db_fetch_all("SELECT * FROM jenis_barang WHERE status_aktif = true ORDER BY nama_barang");
 $selected_jenis = (int) ($_GET['jenis'] ?? $_POST['id_jenis'] ?? ($jenis_list[0]['id_jenis'] ?? 0));
-$errors = [];
-$success = '';
-$results = [];
-$warning = '';
+$errors         = [];
+$success        = '';
+$results        = [];
+$warning        = '';
 
-function formatScore(float $score): string {
+function formatScore(float $score): string
+{
     return number_format($score, 4, '.', '');
 }
 
@@ -28,22 +29,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['aksi']) && $_POST['ak
     }
 
     if (empty($errors)) {
-        $kriteria_list = mysqli_fetch_all(mysqli_query($conn, "SELECT * FROM kriteria ORDER BY id_kriteria"), MYSQLI_ASSOC);
-        $penilaian_res = mysqli_query($conn, "SELECT p.id_vendor, p.id_kriteria, p.nilai_kriteria,
-            v.nama_vendor, k.bobot, k.nama_kriteria
-            FROM penilaian p
-            JOIN vendor v ON v.id_vendor = p.id_vendor
-            JOIN kriteria k ON k.id_kriteria = p.id_kriteria
-            WHERE p.id_periode=$periode_id AND p.id_jenis=$selected_jenis AND v.status_aktif=1
-            ORDER BY p.id_vendor, p.id_kriteria");
+        $kriteria_list = db_fetch_all("SELECT * FROM kriteria ORDER BY id_kriteria");
+        $penilaian_res = db_fetch_all(
+            "SELECT p.id_vendor, p.id_kriteria, p.nilai_kriteria,
+                v.nama_vendor, k.bobot, k.nama_kriteria
+             FROM penilaian p
+             JOIN vendor v ON v.id_vendor = p.id_vendor
+             JOIN kriteria k ON k.id_kriteria = p.id_kriteria
+             WHERE p.id_periode = ? AND p.id_jenis = ? AND v.status_aktif = true
+             ORDER BY p.id_vendor, p.id_kriteria",
+            [$periode_id, $selected_jenis]
+        );
 
-        $data = [];
-        $vendor_names = [];
+        $data          = [];
+        $vendor_names  = [];
         $criterion_max = [];
 
-        while ($row = mysqli_fetch_assoc($penilaian_res)) {
-            $vid = $row['id_vendor'];
-            $kid = $row['id_kriteria'];
+        foreach ($penilaian_res as $row) {
+            $vid   = $row['id_vendor'];
+            $kid   = $row['id_kriteria'];
             $nilai = (float) $row['nilai_kriteria'];
             $data[$vid][$kid] = $nilai;
             $vendor_names[$vid] = $row['nama_vendor'];
@@ -56,7 +60,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['aksi']) && $_POST['ak
 
         if (empty($errors)) {
             $complete_vendors = [];
-            $kriteria_count = count($kriteria_list);
+            $kriteria_count   = count($kriteria_list);
             foreach ($data as $vid => $values) {
                 if (count($values) === $kriteria_count) {
                     $complete_vendors[] = $vid;
@@ -72,52 +76,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['aksi']) && $_POST['ak
                 foreach ($complete_vendors as $vid) {
                     $total = 0.0;
                     foreach ($kriteria_list as $kriteria) {
-                        $kid = $kriteria['id_kriteria'];
-                        $nilai = $data[$vid][$kid];
-                        $max = $criterion_max[$kid] ?: 1;
+                        $kid        = $kriteria['id_kriteria'];
+                        $nilai      = $data[$vid][$kid];
+                        $max        = $criterion_max[$kid] ?: 1;
                         $normalized = $nilai / $max;
-                        $total += $normalized * (float) $kriteria['bobot'];
+                        $total      += $normalized * (float) $kriteria['bobot'];
                     }
                     $rank_data[$vid] = [
-                        'nama_vendor' => $vendor_names[$vid],
+                        'nama_vendor'      => $vendor_names[$vid],
                         'nilai_preferensi' => $total,
                     ];
                 }
 
                 arsort($rank_data);
-                mysqli_query($conn, "DELETE d FROM detail_normalisasi d
-                    JOIN hasil_saw h ON h.id_hasil = d.id_hasil
-                    WHERE h.id_periode = $periode_id AND h.id_jenis = $selected_jenis");
-                mysqli_query($conn, "DELETE FROM hasil_saw WHERE id_periode = $periode_id AND id_jenis = $selected_jenis");
+                
+                // PostgreSQL: DELETE FROM ... WHERE ... IN (SELECT ...)
+                db_query(
+                    "DELETE FROM detail_normalisasi WHERE id_hasil IN (
+                        SELECT id_hasil FROM hasil_saw WHERE id_periode = ? AND id_jenis = ?
+                    )",
+                    [$periode_id, $selected_jenis]
+                );
+                db_query(
+                    "DELETE FROM hasil_saw WHERE id_periode = ? AND id_jenis = ?",
+                    [$periode_id, $selected_jenis]
+                );
 
                 $rank = 1;
                 foreach ($rank_data as $vid => $row) {
                     $nilai_preferensi = number_format($row['nilai_preferensi'], 6, '.', '');
-                    mysqli_query($conn, "INSERT INTO hasil_saw (id_vendor,id_jenis,id_periode,nilai_preferensi,peringkat)
-                        VALUES ($vid,$selected_jenis,$periode_id,$nilai_preferensi,$rank)");
-                    $id_hasil = mysqli_insert_id($conn);
-                    if (!$id_hasil) {
-                        $id_hasil = mysqli_fetch_row(mysqli_query($conn, "SELECT id_hasil FROM hasil_saw WHERE id_vendor=$vid AND id_jenis=$selected_jenis AND id_periode=$periode_id"))[0];
-                    }
+                    // Gunakan RETURNING id_hasil
+                    $stmt = db_query(
+                        "INSERT INTO hasil_saw (id_vendor, id_jenis, id_periode, nilai_preferensi, peringkat)
+                         VALUES (?, ?, ?, ?, ?) RETURNING id_hasil",
+                        [$vid, $selected_jenis, $periode_id, $nilai_preferensi, $rank]
+                    );
+                    $id_hasil = db_insert_id($stmt, 'id_hasil');
 
-                    $detail_values = [];
                     foreach ($kriteria_list as $kriteria) {
-                        $kid = $kriteria['id_kriteria'];
-                        $nilai = $data[$vid][$kid];
-                        $max = $criterion_max[$kid] ?: 1;
+                        $kid        = $kriteria['id_kriteria'];
+                        $nilai      = $data[$vid][$kid];
+                        $max        = $criterion_max[$kid] ?: 1;
                         $normalized = $nilai / $max;
-                        $terbobot = $normalized * (float) $kriteria['bobot'];
-                        $detail_values[] = "($id_hasil,$kid,$nilai,$normalized,{$kriteria['bobot']},$terbobot)";
-                    }
-                    if ($detail_values) {
-                        mysqli_query($conn, "INSERT INTO detail_normalisasi
-                            (id_hasil,id_kriteria,nilai_asli,nilai_normalisasi,bobot_kriteria,nilai_terbobot)
-                            VALUES " . implode(',', $detail_values));
+                        $terbobot   = $normalized * (float) $kriteria['bobot'];
+                        db_query(
+                            "INSERT INTO detail_normalisasi
+                             (id_hasil, id_kriteria, nilai_asli, nilai_normalisasi, bobot_kriteria, nilai_terbobot)
+                             VALUES (?, ?, ?, ?, ?, ?)",
+                            [$id_hasil, $kid, $nilai, $normalized, $kriteria['bobot'], $terbobot]
+                        );
                     }
 
                     $results[] = [
-                        'peringkat' => $rank,
-                        'nama_vendor' => $row['nama_vendor'],
+                        'peringkat'        => $rank,
+                        'nama_vendor'      => $row['nama_vendor'],
                         'nilai_preferensi' => $nilai_preferensi,
                     ];
                     $rank++;
@@ -132,14 +144,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['aksi']) && $_POST['ak
 }
 
 if (empty($results) && $selected_jenis && $periode_id) {
-    $result_res = mysqli_query($conn, "SELECT h.peringkat, h.nilai_preferensi, v.nama_vendor
-        FROM hasil_saw h
-        JOIN vendor v ON v.id_vendor = h.id_vendor
-        WHERE h.id_periode=$periode_id AND h.id_jenis=$selected_jenis
-        ORDER BY h.peringkat ASC, h.nilai_preferensi DESC");
-    while ($row = mysqli_fetch_assoc($result_res)) {
-        $results[] = $row;
-    }
+    $results = db_fetch_all(
+        "SELECT h.peringkat, h.nilai_preferensi, v.nama_vendor
+         FROM hasil_saw h
+         JOIN vendor v ON v.id_vendor = h.id_vendor
+         WHERE h.id_periode = ? AND h.id_jenis = ?
+         ORDER BY h.peringkat ASC, h.nilai_preferensi DESC",
+        [$periode_id, $selected_jenis]
+    );
 }
 
 require_once 'header.php';

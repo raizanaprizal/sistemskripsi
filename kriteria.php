@@ -6,32 +6,38 @@ requireRole('Administrator');
 $page_title  = 'Data Kriteria';
 $active_menu = 'kriteria';
 
-$search = clean($conn, $_GET['search'] ?? '');
+$search = trim($_GET['search'] ?? '');
+$params = [];
 $where  = "WHERE 1=1";
 if ($search) {
-    $where .= " AND (nama_kriteria LIKE '%$search%' OR kode_kriteria LIKE '%$search%')";
+    $where   .= " AND (nama_kriteria ILIKE ? OR kode_kriteria ILIKE ?)";
+    $params[] = "%{$search}%";
+    $params[] = "%{$search}%";
 }
 
-$kriteria_all = mysqli_query($conn, "SELECT * FROM kriteria $where ORDER BY id_kriteria");
-$edit_data = null;
+$kriteria_all = db_fetch_all("SELECT * FROM kriteria $where ORDER BY id_kriteria", $params);
+$edit_data    = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['aksi'])) {
-    $aksi = $_POST['aksi'];
-    $kode = clean($conn, $_POST['kode_kriteria'] ?? '');
-    $nama = clean($conn, $_POST['nama_kriteria'] ?? '');
-    $bobot = (float) ($_POST['bobot'] ?? 0);
-    $jenis = $_POST['jenis_kriteria'] === 'cost' ? 'cost' : 'benefit';
-    $nilai_min = is_numeric($_POST['nilai_min'] ?? null) ? number_format((float) $_POST['nilai_min'], 2, '.', '') : 0;
-    $nilai_max = is_numeric($_POST['nilai_max'] ?? null) ? number_format((float) $_POST['nilai_max'], 2, '.', '') : 100;
-    $keterangan = clean($conn, $_POST['keterangan'] ?? '');
+    $aksi       = $_POST['aksi'];
+    $kode       = trim($_POST['kode_kriteria'] ?? '');
+    $nama       = trim($_POST['nama_kriteria'] ?? '');
+    $bobot      = (float) ($_POST['bobot'] ?? 0);
+    $jenis      = ($_POST['jenis_kriteria'] ?? '') === 'cost' ? 'cost' : 'benefit';
+    $nilai_min  = is_numeric($_POST['nilai_min'] ?? null) ? number_format((float) $_POST['nilai_min'], 2, '.', '') : 0;
+    $nilai_max  = is_numeric($_POST['nilai_max'] ?? null) ? number_format((float) $_POST['nilai_max'], 2, '.', '') : 100;
+    $keterangan = trim($_POST['keterangan'] ?? '');
 
     if ($aksi === 'tambah') {
-        $exists = mysqli_fetch_row(mysqli_query($conn, "SELECT id_kriteria FROM kriteria WHERE kode_kriteria='$kode' LIMIT 1"));
+        $exists = db_fetch("SELECT id_kriteria FROM kriteria WHERE kode_kriteria = ?", [$kode]);
         if ($exists) {
             setAlert('danger', 'Kode kriteria sudah digunakan. Gunakan kode lain.');
         } else {
-            mysqli_query($conn, "INSERT INTO kriteria (kode_kriteria,nama_kriteria,bobot,jenis_kriteria,nilai_min,nilai_max,keterangan)
-                VALUES ('$kode','$nama',$bobot,'$jenis',$nilai_min,$nilai_max,'$keterangan')");
+            db_query(
+                "INSERT INTO kriteria (kode_kriteria, nama_kriteria, bobot, jenis_kriteria, nilai_min, nilai_max, keterangan)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [$kode, $nama, $bobot, $jenis, $nilai_min, $nilai_max, $keterangan]
+            );
             setAlert('success', 'Data kriteria berhasil disimpan.');
         }
         redirect('kriteria.php');
@@ -39,29 +45,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['aksi'])) {
 
     if ($aksi === 'ubah') {
         $id = (int) ($_POST['id_kriteria'] ?? 0);
-        mysqli_query($conn, "UPDATE kriteria SET nama_kriteria='$nama', bobot=$bobot,
-            jenis_kriteria='$jenis', nilai_min=$nilai_min, nilai_max=$nilai_max,
-            keterangan='$keterangan' WHERE id_kriteria=$id");
+        db_query(
+            "UPDATE kriteria SET nama_kriteria = ?, bobot = ?, jenis_kriteria = ?,
+             nilai_min = ?, nilai_max = ?, keterangan = ? WHERE id_kriteria = ?",
+            [$nama, $bobot, $jenis, $nilai_min, $nilai_max, $keterangan, $id]
+        );
         setAlert('success', 'Data kriteria berhasil diperbarui.');
         redirect('kriteria.php');
     }
 }
 
 if (isset($_GET['hapus'])) {
-    $id = (int) $_GET['hapus'];
-    $cek = mysqli_fetch_row(mysqli_query($conn, "SELECT id_penilaian FROM penilaian WHERE id_kriteria=$id LIMIT 1"));
+    $id  = (int) $_GET['hapus'];
+    $cek = db_fetch("SELECT id_penilaian FROM penilaian WHERE id_kriteria = ? LIMIT 1", [$id]);
     if ($cek) {
-        setAlert('danger','Kriteria tidak bisa dihapus karena sudah digunakan di penilaian.');
+        setAlert('danger', 'Kriteria tidak bisa dihapus karena sudah digunakan di penilaian.');
     } else {
-        mysqli_query($conn, "DELETE FROM kriteria WHERE id_kriteria=$id");
-        setAlert('success','Data kriteria berhasil dihapus.');
+        db_query("DELETE FROM kriteria WHERE id_kriteria = ?", [$id]);
+        setAlert('success', 'Data kriteria berhasil dihapus.');
     }
     redirect('kriteria.php');
 }
 
 if (isset($_GET['edit'])) {
-    $id = (int) $_GET['edit'];
-    $edit_data = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM kriteria WHERE id_kriteria=$id"));
+    $id        = (int) $_GET['edit'];
+    $edit_data = db_fetch("SELECT * FROM kriteria WHERE id_kriteria = ?", [$id]);
 }
 
 require_once 'header.php';
@@ -93,15 +101,11 @@ require_once 'header.php';
     <table class="tbl">
       <thead>
         <tr>
-          <th>No</th>
-          <th>Kode</th>
-          <th>Nama Kriteria</th>
-          <th>Bobot</th>
-          <th>Aksi</th>
+          <th>No</th><th>Kode</th><th>Nama Kriteria</th><th>Bobot</th><th>Aksi</th>
         </tr>
       </thead>
       <tbody>
-        <?php $no = 1; while ($k = mysqli_fetch_assoc($kriteria_all)): ?>
+        <?php $no = 1; foreach ($kriteria_all as $k): ?>
         <tr>
           <td><?= $no++ ?></td>
           <td><?= htmlspecialchars($k['kode_kriteria']) ?></td>
@@ -112,7 +116,7 @@ require_once 'header.php';
             <a href="kriteria.php?hapus=<?= $k['id_kriteria'] ?>" class="btn btn-danger btn-sm" onclick="return confirmDelete()">Hapus</a>
           </td>
         </tr>
-        <?php endwhile; ?>
+        <?php endforeach; ?>
       </tbody>
     </table>
   </div>
@@ -134,7 +138,6 @@ require_once 'header.php';
           <input type="text" name="nama_kriteria" class="form-control" placeholder="Nama kriteria" required>
         </div>
       </div>
-
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Bobot</label>
@@ -144,12 +147,10 @@ require_once 'header.php';
       <input type="hidden" name="jenis_kriteria" value="benefit">
       <input type="hidden" name="nilai_min" value="0.00">
       <input type="hidden" name="nilai_max" value="100.00">
-
       <div class="form-group">
         <label class="form-label">Keterangan</label>
         <textarea name="keterangan" class="form-control" rows="3"></textarea>
       </div>
-
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
         <button type="button" onclick="document.getElementById('modal-tambah').style.display='none'" class="btn btn-secondary">Batal</button>
         <button type="submit" class="btn btn-primary">Simpan</button>
@@ -165,7 +166,6 @@ require_once 'header.php';
     <form method="POST">
       <input type="hidden" name="aksi" value="ubah">
       <input type="hidden" name="id_kriteria" value="<?= $edit_data['id_kriteria'] ?>">
-
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Kode Kriteria</label>
@@ -176,7 +176,6 @@ require_once 'header.php';
           <input type="text" name="nama_kriteria" class="form-control" value="<?= htmlspecialchars($edit_data['nama_kriteria']) ?>" required>
         </div>
       </div>
-
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Bobot</label>
@@ -186,12 +185,10 @@ require_once 'header.php';
       <input type="hidden" name="jenis_kriteria" value="<?= htmlspecialchars($edit_data['jenis_kriteria']) ?>">
       <input type="hidden" name="nilai_min" value="<?= htmlspecialchars($edit_data['nilai_min']) ?>">
       <input type="hidden" name="nilai_max" value="<?= htmlspecialchars($edit_data['nilai_max']) ?>">
-
       <div class="form-group">
         <label class="form-label">Keterangan</label>
         <textarea name="keterangan" class="form-control" rows="3"><?= htmlspecialchars($edit_data['keterangan']) ?></textarea>
       </div>
-
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
         <button type="button" onclick="window.location='kriteria.php'" class="btn btn-secondary">Batal</button>
         <button type="submit" class="btn btn-primary">Perbarui</button>

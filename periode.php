@@ -1,37 +1,45 @@
 <?php
 require_once 'database.php';
 require_once 'session.php';
-requireRole(['Administrator','Staff']);
+requireRole(['Administrator', 'Staff']);
 
 $page_title  = 'Periode';
 $active_menu = 'periode';
 
-$search = clean($conn, $_GET['search'] ?? '');
+$search = trim($_GET['search'] ?? '');
+$params = [];
 $where  = "WHERE 1=1";
 if ($search) {
-    $where .= " AND (tahun LIKE '%$search%' OR semester LIKE '%$search%')";
+    $where   .= " AND (tahun ILIKE ? OR semester ILIKE ?)";
+    $params[] = "%{$search}%";
+    $params[] = "%{$search}%";
 }
 
-$periode_all = mysqli_query($conn, "SELECT * FROM periode $where ORDER BY tahun DESC, semester ASC");
-$edit_data = null;
+$periode_all = db_fetch_all("SELECT * FROM periode $where ORDER BY tahun DESC, semester ASC", $params);
+$edit_data   = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['aksi'])) {
-    $aksi = $_POST['aksi'];
-    $tahun = clean($conn, $_POST['tahun'] ?? '');
-    $semester = clean($conn, $_POST['semester'] ?? '');
-    $aktif = isset($_POST['status_aktif']) ? 1 : 0;
-    $keterangan = clean($conn, $_POST['keterangan'] ?? '');
+    $aksi       = $_POST['aksi'];
+    $tahun      = trim($_POST['tahun'] ?? '');
+    $semester   = trim($_POST['semester'] ?? '');
+    $aktif      = isset($_POST['status_aktif']) ? true : false;
+    $keterangan = trim($_POST['keterangan'] ?? '');
 
     if ($aksi === 'tambah') {
-        $exists = mysqli_fetch_row(mysqli_query($conn, "SELECT id_periode FROM periode WHERE tahun='$tahun' AND semester='$semester' LIMIT 1"));
+        $exists = db_fetch(
+            "SELECT id_periode FROM periode WHERE tahun = ? AND semester = ?",
+            [$tahun, $semester]
+        );
         if ($exists) {
             setAlert('danger', 'Periode sudah ada. Pilih tahun/semester lain.');
         } else {
             if ($aktif) {
-                mysqli_query($conn, "UPDATE periode SET status_aktif=0 WHERE status_aktif=1");
+                db_query("UPDATE periode SET status_aktif = false WHERE status_aktif = true");
             }
-            mysqli_query($conn, "INSERT INTO periode (tahun,semester,keterangan,status_aktif)
-                VALUES ('$tahun','$semester','$keterangan',$aktif)");
+            db_query(
+                "INSERT INTO periode (tahun, semester, keterangan, status_aktif) VALUES (?, ?, ?, ?)",
+                [$tahun, $semester, $keterangan, $aktif ? 'true' : 'false']
+            );
             setAlert('success', 'Periode berhasil ditambahkan.');
         }
         redirect('periode.php');
@@ -40,30 +48,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['aksi'])) {
     if ($aksi === 'ubah') {
         $id = (int) ($_POST['id_periode'] ?? 0);
         if ($aktif) {
-            mysqli_query($conn, "UPDATE periode SET status_aktif=0 WHERE status_aktif=1");
+            db_query("UPDATE periode SET status_aktif = false WHERE status_aktif = true");
         }
-        mysqli_query($conn, "UPDATE periode SET tahun='$tahun', semester='$semester',
-            keterangan='$keterangan', status_aktif=$aktif WHERE id_periode=$id");
+        db_query(
+            "UPDATE periode SET tahun = ?, semester = ?, keterangan = ?, status_aktif = ?
+             WHERE id_periode = ?",
+            [$tahun, $semester, $keterangan, $aktif ? 'true' : 'false', $id]
+        );
         setAlert('success', 'Periode berhasil diperbarui.');
         redirect('periode.php');
     }
 }
 
 if (isset($_GET['hapus'])) {
-    $id = (int) $_GET['hapus'];
-    $cek = mysqli_fetch_row(mysqli_query($conn, "SELECT id_penilaian FROM penilaian WHERE id_periode=$id LIMIT 1"));
+    $id  = (int) $_GET['hapus'];
+    $cek = db_fetch("SELECT id_penilaian FROM penilaian WHERE id_periode = ? LIMIT 1", [$id]);
     if ($cek) {
-        setAlert('danger','Periode tidak dapat dihapus karena sudah dipakai dalam penilaian.');
+        setAlert('danger', 'Periode tidak dapat dihapus karena sudah dipakai dalam penilaian.');
     } else {
-        mysqli_query($conn, "DELETE FROM periode WHERE id_periode=$id");
-        setAlert('success','Periode berhasil dihapus.');
+        db_query("DELETE FROM periode WHERE id_periode = ?", [$id]);
+        setAlert('success', 'Periode berhasil dihapus.');
     }
     redirect('periode.php');
 }
 
 if (isset($_GET['edit'])) {
-    $id = (int) $_GET['edit'];
-    $edit_data = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM periode WHERE id_periode=$id"));
+    $id        = (int) $_GET['edit'];
+    $edit_data = db_fetch("SELECT * FROM periode WHERE id_periode = ?", [$id]);
 }
 
 require_once 'header.php';
@@ -93,16 +104,11 @@ require_once 'header.php';
     <table class="tbl">
       <thead>
         <tr>
-          <th>No</th>
-          <th>Tahun</th>
-          <th>Semester</th>
-          <th>Keterangan</th>
-          <th>Status</th>
-          <th>Aksi</th>
+          <th>No</th><th>Tahun</th><th>Semester</th><th>Keterangan</th><th>Status</th><th>Aksi</th>
         </tr>
       </thead>
       <tbody>
-        <?php $no = 1; while ($row = mysqli_fetch_assoc($periode_all)): ?>
+        <?php $no = 1; foreach ($periode_all as $row): ?>
         <tr>
           <td><?= $no++ ?></td>
           <td><?= htmlspecialchars($row['tahun']) ?></td>
@@ -115,7 +121,7 @@ require_once 'header.php';
             <a href="periode.php?hapus=<?= $row['id_periode'] ?>" class="btn btn-danger btn-sm" onclick="return confirmDelete()">Hapus</a>
           </td>
         </tr>
-        <?php endwhile; ?>
+        <?php endforeach; ?>
       </tbody>
     </table>
   </div>
@@ -169,8 +175,8 @@ require_once 'header.php';
         <div class="form-group">
           <label class="form-label">Semester</label>
           <select name="semester" class="form-control" required>
-            <option value="Ganjil" <?= $edit_data['semester']==='Ganjil' ? 'selected' : '' ?>>Ganjil</option>
-            <option value="Genap" <?= $edit_data['semester']==='Genap' ? 'selected' : '' ?>>Genap</option>
+            <option value="Ganjil" <?= $edit_data['semester'] === 'Ganjil' ? 'selected' : '' ?>>Ganjil</option>
+            <option value="Genap"  <?= $edit_data['semester'] === 'Genap'  ? 'selected' : '' ?>>Genap</option>
           </select>
         </div>
       </div>
@@ -179,7 +185,10 @@ require_once 'header.php';
         <textarea name="keterangan" class="form-control" rows="2"><?= htmlspecialchars($edit_data['keterangan']) ?></textarea>
       </div>
       <div class="form-group">
-        <label class="form-label"><input type="checkbox" name="status_aktif" <?= $edit_data['status_aktif'] ? 'checked' : '' ?>> Jadikan Periode Aktif</label>
+        <label class="form-label">
+          <input type="checkbox" name="status_aktif" <?= $edit_data['status_aktif'] ? 'checked' : '' ?>>
+          Jadikan Periode Aktif
+        </label>
       </div>
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
         <button type="button" onclick="window.location='periode.php'" class="btn btn-secondary">Batal</button>
